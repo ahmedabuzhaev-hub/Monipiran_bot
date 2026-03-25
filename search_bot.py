@@ -3,6 +3,7 @@ import sqlite3
 import logging
 import urllib.parse
 from datetime import datetime
+from typing import List, Dict
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
@@ -34,7 +35,7 @@ def init_db():
     conn.commit()
     conn.close()
 
-def save_search(user_id: int, username: str, query: str):
+def save_search(user_id, username, query):
     conn = sqlite3.connect(DB_FILE)
     conn.execute(
         "INSERT INTO searches (user_id, username, query, searched_at) VALUES (?, ?, ?, ?)",
@@ -43,7 +44,7 @@ def save_search(user_id: int, username: str, query: str):
     conn.commit()
     conn.close()
 
-def get_history(user_id: int, limit: int = 10):
+def get_history(user_id, limit=10):
     conn = sqlite3.connect(DB_FILE)
     rows = conn.execute(
         "SELECT query, searched_at FROM searches WHERE user_id = ? ORDER BY id DESC LIMIT ?",
@@ -52,7 +53,7 @@ def get_history(user_id: int, limit: int = 10):
     conn.close()
     return rows
 
-async def search_duckduckgo(query: str, max_results: int = 5) -> list[dict]:
+async def search_duckduckgo(query, max_results=5):
     results = []
     encoded = urllib.parse.quote(query)
     try:
@@ -77,7 +78,7 @@ async def search_duckduckgo(query: str, max_results: int = 5) -> list[dict]:
         logger.warning(f"DuckDuckGo error: {e}")
     return results[:max_results]
 
-def build_social_links(query: str) -> dict:
+def build_social_links(query):
     q = urllib.parse.quote(query)
     return {
         "🌐 Google":    f"https://www.google.com/search?q={q}",
@@ -90,7 +91,7 @@ def build_social_links(query: str) -> dict:
         "👾 Reddit":    f"https://www.reddit.com/search/?q={q}",
     }
 
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_start(update, context):
     text = (
         "👋 Привет! Я бот для поиска по ключевым словам.\n\n"
         "🔍 Просто напишите что хотите найти — и я дам вам:\n"
@@ -103,23 +104,18 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(text)
 
-async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_help(update, context):
     text = (
         "ℹ️ <b>Как пользоваться ботом</b>\n\n"
         "1️⃣ Напишите любое ключевое слово или фразу\n"
         "2️⃣ Бот найдёт информацию в интернете\n"
         "3️⃣ Получите прямые ссылки для поиска в:\n"
-        "   Google, VK, Instagram, Telegram, YouTube,\n"
-        "   Twitter/X, LinkedIn, Reddit\n\n"
-        "💡 <b>Примеры запросов:</b>\n"
-        "   • <code>Иван Иванов программист</code>\n"
-        "   • <code>маркетинг агентство Москва</code>\n"
-        "   • <code>новости AI 2024</code>\n\n"
+        "   Google, VK, Instagram, Telegram, YouTube\n\n"
         "📌 /history — последние 10 поисков"
     )
     await update.message.reply_text(text, parse_mode="HTML")
 
-async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_history(update, context):
     user_id = update.effective_user.id
     rows = get_history(user_id)
     if not rows:
@@ -130,12 +126,12 @@ async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append(f"{i}. <code>{q}</code>\n   🕒 {t}")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
-async def do_search(update: Update, context: ContextTypes.DEFAULT_TYPE, query: str):
+async def do_search(update, context, query):
     user = update.effective_user
     msg = await update.message.reply_text(f"🔍 Ищу: <b>{query}</b>...", parse_mode="HTML")
     save_search(user.id, user.username, query)
     web_results = await search_duckduckgo(query)
-    response_lines = [f"🔎 <b>Результаты по запросу:</b> <code>{query}</code>\n"]
+    response_lines = [f"🔎 <b>Результаты:</b> <code>{query}</code>\n"]
     if web_results:
         response_lines.append("🌐 <b>Из интернета:</b>")
         for r in web_results:
@@ -147,7 +143,7 @@ async def do_search(update: Update, context: ContextTypes.DEFAULT_TYPE, query: s
             else:
                 response_lines.append(f"• <b>{title}</b>\n  {snippet}\n")
     else:
-        response_lines.append("⚠️ Прямых результатов не найдено. Используйте ссылки ниже.\n")
+        response_lines.append("⚠️ Используйте ссылки ниже.\n")
     social = build_social_links(query)
     keyboard = []
     items = list(social.items())
@@ -165,20 +161,20 @@ async def do_search(update: Update, context: ContextTypes.DEFAULT_TYPE, query: s
         disable_web_page_preview=True
     )
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_message(update, context):
     query = update.message.text.strip()
     if not query:
         return
     await do_search(update, context, query)
 
-async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_search(update, context):
     if not context.args:
         await update.message.reply_text("✏️ Напишите запрос: /search <ключевые слова>")
         return
     query = " ".join(context.args)
     await do_search(update, context, query)
 
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_callback(update, context):
     query = update.callback_query
     await query.answer()
     if query.data == "new_search":
@@ -193,7 +189,7 @@ def main():
     app.add_handler(CommandHandler("history", cmd_history))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    print("✅ Бот запущен!")
+    print("Bot started!")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
